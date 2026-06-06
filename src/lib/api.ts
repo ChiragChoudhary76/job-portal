@@ -1,23 +1,39 @@
-const API_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const PRODUCTION_API_URL = 'https://job-portal-backend.onrender.com/api';
+const LOCAL_API_URL = 'http://localhost:5000/api';
+
+function resolveApiUrl(): string {
+  const envUrl = import.meta.env.VITE_API_URL?.trim();
+  if (envUrl) return envUrl;
+  if (import.meta.env.PROD) return PRODUCTION_API_URL;
+  return LOCAL_API_URL;
+}
+
+const API_URL = resolveApiUrl();
 
 export { API_URL };
 
-// API request timeout (10 seconds)
-const REQUEST_TIMEOUT = 10000;
+// Render free tier can take ~30s to wake from sleep
+const REQUEST_TIMEOUT = import.meta.env.PROD ? 30000 : 10000;
+const AUTH_MAX_RETRIES = 2;
 
-// Helper function for fetch with timeout
-async function fetchWithTimeout(url: string, options: RequestInit = {}) {
+function timeoutMessage(): string {
+  if (import.meta.env.PROD) {
+    return 'The server is waking up. Please wait a moment and try again.';
+  }
+  return `Request timed out. Is the backend running on ${LOCAL_API_URL.replace('/api', '')}?`;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-  
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    
+
     if (!response.ok) {
       let message = `HTTP Error: ${response.status}`;
       try {
@@ -28,15 +44,39 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}) {
       }
       throw new Error(message);
     }
-    
+
     return response;
   } catch (error) {
     clearTimeout(timeout);
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Request timed out. Is the backend running on http://localhost:5000?');
+      throw new Error(timeoutMessage());
     }
     throw error;
   }
+}
+
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = AUTH_MAX_RETRIES) {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchWithTimeout(url, options);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Request failed');
+      const isRetryable =
+        lastError.message.includes('waking up') ||
+        lastError.message.includes('Failed to fetch') ||
+        lastError.message.includes('NetworkError');
+
+      if (!isRetryable || attempt === retries) {
+        throw lastError;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+
+  throw lastError ?? new Error('Request failed');
 }
 
 export type UserRole = 'seeker' | 'employer';
@@ -115,7 +155,7 @@ export interface Application {
 export const authAPI = {
   signUp: async (email: string, password: string, fullName: string, role: UserRole, companyName?: string) => {
     try {
-      const response = await fetchWithTimeout(`${API_URL}/auth/signup`, {
+      const response = await fetchWithRetry(`${API_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, fullName, role, companyName })
@@ -129,7 +169,7 @@ export const authAPI = {
 
   signIn: async (email: string, password: string) => {
     try {
-      const response = await fetchWithTimeout(`${API_URL}/auth/signin`, {
+      const response = await fetchWithRetry(`${API_URL}/auth/signin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })

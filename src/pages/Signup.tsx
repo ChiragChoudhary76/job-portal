@@ -27,9 +27,12 @@ export default function Signup() {
 
     try {
       await signUp(email, password, fullName, role, role === 'employer' ? companyName : undefined);
+      setError('');
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign up');
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to sign up. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }

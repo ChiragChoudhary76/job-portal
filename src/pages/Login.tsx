@@ -23,9 +23,12 @@ export default function Login() {
 
     try {
       await signIn(email, password);
+      setError('');
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to sign in. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }

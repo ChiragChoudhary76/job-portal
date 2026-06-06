@@ -1,4 +1,9 @@
 {
+  "build": {
+    "env": {
+      "VITE_API_URL": "https://job-portal-backend.onrender.com/api"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
